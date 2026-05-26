@@ -23,7 +23,7 @@ def _board_to_strings(state) -> list[str]:
     
 def _hero_cards(state, hero_index: int) -> list[str]:
     try:
-        return _cards_to_strngs(state.hole_cards[hero_index])
+        return _cards_to_string(state.hole_cards[hero_index])
     except Exception:
         return []
     

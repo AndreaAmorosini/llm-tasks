@@ -1,0 +1,66 @@
+STACKS: numero di fisches
+Hole cards: prime due carte in mano iniziali
+STREET: Turno in una mano
+POT: fiche puntate sul banco
+    after : pot=15, stacks=[995, 990, 990, 1000], bets=[5, 10, 10, 0]
+        15 fiches sul banco dall'azione precedente + bets da ogni giocatore per il turno corrente
+
+PAYOFFS: guadagno o perdita per un player nella mano
+
+
+CARTE:
+    Rank + Suit
+
+    2 3 4 5 6 7 8 9 T J Q K A
+
+    c = clubs     = fiori
+    d = diamonds  = quadri
+    h = hearts    = cuori
+    s = spades    = picche
+
+
+FLUSSO:
+    PREFLOP -> FLOP -> TURN -> RIVER -> SHOWDOWN
+
+    PREFLOP: Fase iniziale ognuno con due carte in mano coperte
+    FLOP: Vengono scoperte le prime tre carte sul banco
+    TURN : Quarta carta sul banco
+    RIVER: Quinta e ultima carta sul banco
+    SHOWDOWN: SI Scoprono le carte
+
+AZIONI:
+    [000] P2 (Random_2) -> call 10
+        step 000:
+        il player P2,
+        gestito dall'agente Random_2,
+        ha fatto call di 10 fiches.
+
+    FOLD, CHECK, CALL, BET, RAISE, ALL_IN
+
+
+COMBINAZIONI CARTE:
+    1. Scala reale       A K Q J T stesso seme
+    2. Scala colore      cinque carte consecutive stesso seme
+    3. Poker             quattro carte uguali
+    4. Full house        tris + coppia
+    5. Colore            cinque carte stesso seme
+    6. Scala             cinque carte consecutive
+    7. Tris              tre carte uguali
+    8. Doppia coppia     due coppie
+    9. Coppia            due carte uguali
+    10. Carta alta       nessuna combinazione
+
+
+stack       fiches che un player ha ancora
+pot         piatto
+bet         puntata
+call        pareggio la puntata
+raise       rilancio
+fold        abbandono
+check       passo senza puntare
+all-in      punto tutto
+board       carte comuni
+hole cards  carte private
+street      fase della mano
+showdown    confronto finale delle mani
+payoff      guadagno/perdita netta della mano

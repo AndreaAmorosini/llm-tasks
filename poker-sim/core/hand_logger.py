@@ -46,6 +46,7 @@ class ActionLog:
     legal_actions: list[dict[str, Any]]
     raw_action: dict[str, Any]
     applied_action: dict[str, Any]
+    decision_meta: dict[str, Any] | None = None
     stacks_after: list[int] | None = None
     bets_after: list[int] | None = None
     pot_after: int | None = None
@@ -70,11 +71,17 @@ class HandLogger:
         state,
         reveal_hole_cards: bool = True,
         include_legal_actions: bool = True,
-        include_pokerkit_operations: bool = False
+        include_pokerkit_operations: bool = False,
+        player_labels: dict[int, str] | None = None
     ):
         self.reveal_hole_cards = reveal_hole_cards
         self.include_legal_actions = include_legal_actions
         self.include_pokerkit_operations = include_pokerkit_operations
+        
+        self.player_labels = player_labels or {
+            i: f"P{i}"
+            for i in range(state.player_count)
+        }
         
         self.hand = HandLog(
             hand_number = hand_number,
@@ -101,6 +108,7 @@ class HandLogger:
         legal_actions: list[dict[str, Any]],
         raw_action: dict[str, Any],
         applied_action: dict[str, Any],
+        decision_meta: dict[str, Any] | None = None
     ) -> int:
         
         action = ActionLog(
@@ -114,7 +122,8 @@ class HandLogger:
             pot_before=int(getattr(state, "total_pot_amount", 0)),
             legal_actions=legal_actions if self.include_legal_actions else [],
             raw_action=raw_action,
-            applied_action=applied_action
+            applied_action=applied_action,
+            decision_meta=decision_meta
         )
         
         self.hand.actions.append(action)
@@ -129,8 +138,8 @@ class HandLogger:
         action.pot_after = int(getattr(state, "total_pot_amount", 0))
         
     def finish(self, state) -> HandLog:
-        if self.reveal_hole_cards:
-            self.capture_hole_cards(state)
+        # if self.reveal_hole_cards:
+        #     self.capture_hole_cards(state)
             
         self.hand.final_board = get_board_cards(state)
         self.hand.final_stacks = [int(x) for x in state.stacks]
@@ -163,6 +172,7 @@ class HandLogger:
                     "stacks_after": action.stacks_after,
                     "bets_after": action.bets_after,
                     "pot_after": action.pot_after,
+                    "decision_meta": action.decision_meta,
                 }
                 for action in self.hand.actions
             ],
@@ -184,7 +194,8 @@ class HandLogger:
         if self.hand.hole_cards:
             lines.append("Hole cards:")
             for player_index, cards in self.hand.hole_cards.items():
-                lines.append(f"  P{player_index}: {' '.join(cards) if cards else '[]'}")
+                label = self.player_labels.get(player_index, f"P{player_index}")
+                lines.append(f"  {label}: {' '.join(cards) if cards else '[]'}")
             lines.append("")
 
         current_street = None
@@ -207,7 +218,8 @@ class HandLogger:
 
             lines.append(
                 f"[{action.step:03d}] "
-                f"P{action.actor_index} ({action.agent_name}) -> {rendered_action}"
+                f"{self.player_labels.get(action.actor_index, f'P{action.actor_index}')} "
+                f"({action.agent_name}) -> {rendered_action}"
             )
             lines.append(
                 f"      before: pot={action.pot_before}, "
@@ -234,3 +246,24 @@ class HandLogger:
         lines.append("=" * 80)
 
         return "\n".join(lines)
+    
+    def to_reasoning_dict(self) -> dict[str, Any]:
+        return {
+            "hand_number": self.hand.hand_number,
+            "player_count": self.hand.player_count,
+            "actions": [
+                {
+                    "step": action.step,
+                    "street": action.street,
+                    "actor_index": action.actor_index,
+                    "player_label": self.player_labels.get(action.actor_index, f"P{action.actor_index}"),
+                    "agent_name": action.agent_name,
+                    "board": action.board,
+                    "raw_action": action.raw_action,
+                    "applied_action": action.applied_action,
+                    "decision_meta": action.decision_meta,
+                }
+                for action in self.hand.actions
+                if action.decision_meta is not None
+            ],
+        }

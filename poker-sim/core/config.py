@@ -8,6 +8,7 @@ class GameConfig:
     big_blind: int = 10
     ante: int = 0
     min_bet: int = 10
+    max_hands: int | None = 1_000
     
     @property
     def blinds(self) -> tuple[int, int]:
