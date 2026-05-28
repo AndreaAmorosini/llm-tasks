@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from typing import Any
+import random
 
 from pokerkit import Automation, Mode, NoLimitTexasHoldem
 
@@ -8,6 +9,7 @@ from core.action_mapper import apply_action, get_legal_actions, sanitize_action
 from core.config import GameConfig
 from core.hand_logger import HandLogger
 from core.state_serializer import serialize_state_for_player
+from core.llm_stats import LLMStatsTracker
 
 from agents.pokerbots_bridge import (
     from_pokerbots_action,
@@ -29,10 +31,12 @@ class PokerGame:
             raise ValueError(f"Number of agents ({len(agents)}) must match player count in config ({config.player_count})")
         
         self.config = config
+        self.seed = config.seed
         self.verbose = verbose
         self.reveal_hole_cards = reveal_hole_cards
         self.include_legal_actions_in_log = include_legal_actions_in_log
         self.include_pokerkit_operations = include_pokerkit_operations
+        self.llm_stats = LLMStatsTracker()
         
         self.players: list[TournamentPlayer] = [
             TournamentPlayer(
@@ -50,6 +54,7 @@ class PokerGame:
         self.current_hand_players: list[TournamentPlayer] = []
         
         self.match_log: dict[str, Any] = {
+            "seed": self.seed,
             "starting_player_count": config.player_count,
             "starting_stack": config.starting_stack,
             "hands": [],
@@ -73,6 +78,11 @@ class PokerGame:
         if len(active) == 1:
             return active[0]
         return None
+    
+    def _compute_hand_seed(self) -> int | None:
+        if self.seed is None:
+            return None
+        return self.seed + self.hand_number
 
     def create_state(self):
         active_players = self.active_players
@@ -84,6 +94,10 @@ class PokerGame:
         self.current_hand_player_ids = [p.global_id for p in active_players]
         
         stacks = tuple(player.stack for player in active_players)
+        
+        hand_seed = self._compute_hand_seed()
+        if hand_seed is not None:
+            random.seed(hand_seed)
         
         return NoLimitTexasHoldem.create_state(
             (
@@ -137,6 +151,8 @@ class PokerGame:
             print(self.format_match_summary())
             
         self.match_log["reasoning_log"] = self.format_reasoning_log()
+        self.match_log["human_reasoning_log"] = self.format_human_reasoning_log()
+        self.match_log["llm_stats"] = self.llm_stats.summarize(self.hand_number)
             
         return self.match_log
         
@@ -159,7 +175,8 @@ class PokerGame:
             reveal_hole_cards = self.reveal_hole_cards,
             include_legal_actions = self.include_legal_actions_in_log,
             include_pokerkit_operations = self.include_pokerkit_operations,
-            player_labels=player_labels
+            player_labels=player_labels,
+            hand_seed=self._compute_hand_seed()
         )
         
         step = 0
@@ -175,7 +192,7 @@ class PokerGame:
             legal_actions = get_legal_actions(self.state)
             
             if not legal_actions:
-                self._log("No legal actions available. Ending hand.")
+                print("No legal actions available. Ending hand.")
                 break
             
             local_actor_index = self.state.actor_index
@@ -196,6 +213,24 @@ class PokerGame:
             decision_meta = None
             if hasattr(agent, "consume_last_decision_meta"):
                 decision_meta = agent.consume_last_decision_meta()
+                
+            current_street = getattr(self.state, "street_index", None)
+            street_name = {
+                0: "preflop",
+                1: "flop",
+                2: "turn",
+                3: "river",
+            }.get(current_street, f"street_{current_street}")
+
+            if decision_meta is not None:
+                self.llm_stats.record(
+                    hand_number=self.hand_number,
+                    step=step,
+                    street=street_name,
+                    player_label=player_labels.get(local_actor_index, f"P{local_actor_index}"),
+                    agent_name=agent.name,
+                    decision_meta=decision_meta,
+                )
                 
             action = sanitize_action(raw_action, legal_actions)
             
@@ -261,12 +296,10 @@ class PokerGame:
                     }
                 )
         return eliminations
-    
-    def play_hands(self, count: int) -> list[dict[str, Any]]:
-        return [self.play_hand() for _ in range(count)]
-    
+        
     def result(self, logger: HandLogger, eliminations: list[dict[str, Any]]) -> dict[str, Any]:
         return {
+            "hand_seed": self._compute_hand_seed(),
             "hand_number": self.hand_number,
             "active_global_player_ids": self.current_hand_player_ids,
             "local_to_global_player_ids": self.current_hand_player_ids,
@@ -352,18 +385,45 @@ class PokerGame:
             ]
         }
         
-    def _log_action(self, actor_index: int, agent_name: str, action: dict[str, Any]) -> None:
-        action_type = action["type"]
+    def format_human_reasoning_log(self) -> str:
+        lines: list[str] = []
         
-        if action_type in {"bet", "raise", "all_in"}:
-            msg = f"P{actor_index} {agent_name}: {action_type} to {action['amount_to']}"
-        elif action_type == "call":
-            msg = f"P{actor_index} {agent_name}: call {action.get('amount', 0)}"
-        else:
-            msg = f"P{actor_index} {agent_name}: {action_type}"
+        for hand in self.match_log.get("hands", []):
+            reasoning_log = hand.get("reasoning_log")
+            if not reasoning_log:
+                continue
             
-    def _log(self, message: str) -> None:
-        self.log.append(message)
-        
-        if self.verbose:
-            print(message)
+            hand_number = reasoning_log.get("hand_number")
+            
+            for action in reasoning_log.get("actions", []):
+                own_hole_cards = action.get("own_hole_cards", [])
+                board = action.get("board", [])
+                applied_action = action.get("applied_action", {})
+                decision_meta = action.get("decision_meta", {})
+                
+                action_taken = applied_action.get("type", "unknown")
+                if action_taken in ["bet", "raise", "all_in"]:
+                    action_taken = f"{action_taken} {applied_action.get('amount_to', '')}"
+                elif action_taken == "call":
+                    action_taken = f"call {applied_action.get('amount_to', '')}"
+                    
+                reasoning = decision_meta.get("response_thinking")
+                motivation = action.get("motivation") or decision_meta.get("final_reason")
+                
+                player_stack = action.get("player_stack_before_action")
+                player_bet = action.get("player_current_bet_before_action")
+                pot_size = action.get("pot_size_before_action")
+                
+                lines.append("-" * 40)
+                lines.append(f"Hand #{hand_number} - Turn {action.get('step')} - Street: {action.get('street')}")
+                lines.append(f"Player: {action.get('player_label')} - Stack before action: {player_stack}")
+                lines.append(f"Current bet before action: {player_bet} - Pot size before action: {pot_size}")
+                lines.append(f"Current cards in hand: {', '.join(own_hole_cards) if own_hole_cards else '[]'}")
+                lines.append(f"Current Board: {', '.join(board) if board else '[]'}")
+                lines.append(f"Action taken: {action_taken}")
+                lines.append(f"Reasoning: {reasoning if reasoning else 'N/A'}")
+                lines.append(f"Motivation: {motivation if motivation else 'N/A'}")
+                lines.append("-" * 40)
+                lines.append("\n")
+
+        return "\n".join(lines).strip()

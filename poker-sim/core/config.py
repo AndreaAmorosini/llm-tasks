@@ -9,11 +9,8 @@ class GameConfig:
     ante: int = 0
     min_bet: int = 10
     max_hands: int | None = 1_000
+    seed: int | None = None
     
     @property
     def blinds(self) -> tuple[int, int]:
         return self.small_blind, self.big_blind
-    
-    @property
-    def starting_stacks(self) -> tuple[int, ...]:
-        return tuple([self.starting_stack] * self.player_count)

@@ -4,10 +4,8 @@ import os
 from pathlib import Path
 from typing import Any
 from datetime import datetime
+import random
 
-
-from agents.random_agent import RandomAgent
-from agents.rule_agent import TightPassiveAgent
 from core.config import GameConfig
 from core.game import PokerGame
 
@@ -80,36 +78,26 @@ def env_float(name: str, default: float) -> float:
     
     return float(value)
 
-def build_agents(kind: str, player_count: int, ollama_model: str, ollama_host: str, ollama_temperature: float, ollama_timeout: int, ollama_think: bool | str):
-    if kind == "random":
-        return [RandomAgent(name=f"Random_{i}") for i in range(player_count)]
+def make_rng(seed: int | None, offset: int) -> random.Random:
+    if seed is None:
+        return random.Random()
+    return random.Random(seed + offset)
+    
 
-    if kind == "tight":
-        return [TightPassiveAgent(name=f"Tight_{i}") for i in range(player_count)]
-
-    if kind == "mixed":
-        agents = []
-
-        for i in range(player_count):
-            if i % 2 == 0:
-                agents.append(RandomAgent(name=f"Random_{i}"))
-            else:
-                agents.append(TightPassiveAgent(name=f"Tight_{i}"))
-
-        return agents
+def build_agents(kind: str, player_count: int, agent_seed: int | None, ollama_model: str, ollama_host: str, ollama_temperature: float, ollama_timeout: int, ollama_think: bool | str):
     
     if kind == "pokerbots-random":
-        return [PokerBotsRandomPlayer(name=f"PB_Random{i}") for i in range(player_count)]
+        return [PokerBotsRandomPlayer(name=f"PB_Random{i}", rng=make_rng(agent_seed, 20_000 + i)) for i in range(player_count)]
     
     if kind == "pokerbots-calling":
         return [CallingPlayer(name=f"PB_Calling{i}") for i in range(player_count)]
     
     if kind == "pokerbots-gambling":
-        return [GamblingPlayer(name=f"PB_Gambling{i}") for i in range(player_count)]
+        return [GamblingPlayer(name=f"PB_Gambling{i}", rng=make_rng(agent_seed, 30_000 + i)) for i in range(player_count)]
     
     if kind == "mixed-pokerbots":
         classes = [PokerBotsRandomPlayer, CallingPlayer, GamblingPlayer]
-        return [classes[i % len(classes)](name=f"{classes[i % len(classes)].__name__}_{i}") for i in range(player_count)]
+        return [classes[i % len(classes)](name=f"{classes[i % len(classes)].__name__}_{i}", rng=make_rng(agent_seed, 40_000 + i)) for i in range(player_count)]
     
     if kind == "ollama-vs":
         agents = []
@@ -122,9 +110,9 @@ def build_agents(kind: str, player_count: int, ollama_model: str, ollama_host: s
             think=ollama_think
         ))
         
-        agents.append(GamblingPlayer(name="PB_Gambling"))
-        agents.append(CallingPlayer(name="PB_Calling"))
-        agents.append(PokerBotsRandomPlayer(name="PB_Random"))
+        agents.append(GamblingPlayer(name="PB_Gambling_1", rng=make_rng(agent_seed, 50_000)))
+        agents.append(GamblingPlayer(name="PB_Gambling_2", rng=make_rng(agent_seed, 60_000)))
+        agents.append(PokerBotsRandomPlayer(name="PB_Random", rng=make_rng(agent_seed, 70_000)))
         
         return agents
         
@@ -132,16 +120,18 @@ def build_agents(kind: str, player_count: int, ollama_model: str, ollama_host: s
 
     raise ValueError(f"Unknown agent kind: {kind}")
 
-def export_match_results(match_result: dict, export_dir: str | Path) -> Path:
+def export_match_results(match_result: dict, export_dir: str | Path, model_name: str | None = None) -> Path:
     base_dir = Path(export_dir)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    match_dir = base_dir / f"match_{timestamp}"
+    match_dir = base_dir / f"match_{model_name}_{timestamp}"
     
     match_dir.mkdir(parents=True, exist_ok=True)
     
     terminal_log_path = match_dir / "terminal_log.txt"
     json_log_path = match_dir / "match_result.json"
     reasoning_log_path = match_dir / "reasoning_log.json"
+    human_reasoning_log_path = match_dir / "human_reasoning_log.txt"
+    llm_stats_path = match_dir / "llm_stats.json"
 
     terminal_log = match_result.get("match_text_log", "")
     terminal_log_path.write_text(terminal_log, encoding="utf-8")
@@ -154,6 +144,18 @@ def export_match_results(match_result: dict, export_dir: str | Path) -> Path:
     reasoning_log = match_result.get("reasoning_log", {"hands": []})
     reasoning_log_path.write_text(
         json.dumps(reasoning_log, indent=2, ensure_ascii=False),
+        encoding="utf-8"
+    )
+    
+    human_reasoning_log = match_result.get("human_reasoning_log", "")
+    human_reasoning_log_path.write_text(
+        human_reasoning_log,
+        encoding="utf-8"
+    )
+    
+    llm_stats = match_result.get("llm_stats", {"enabled": False})
+    llm_stats_path.write_text(
+        json.dumps(llm_stats, indent=2, ensure_ascii=False),
         encoding="utf-8"
     )
     
@@ -264,6 +266,12 @@ def parse_args() -> argparse.Namespace:
         default=env_bool("POKER_LOG_POKERKIT_OPERATIONS", False),
         help="Include anche le operations interne di PokerKit.",
     )
+    
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=env_optional_int("POKER_SEED", None),
+    )
 
     return parser.parse_args(remaining)
 
@@ -289,13 +297,15 @@ def main() -> None:
         big_blind=args.bb,
         ante=args.ante,
         min_bet=args.bb,
-        max_hands=max_hands
+        max_hands=max_hands,
+        seed=args.seed,
     )
 
     # agents = build_agents(args.agents, args.players)
     agents = build_agents(
         kind=args.agents,
         player_count=args.players,
+        agent_seed=args.seed,
         ollama_model=args.ollama_model,
         ollama_host=args.ollama_host,
         ollama_temperature=args.ollama_temperature,
@@ -315,7 +325,7 @@ def main() -> None:
     match_result = game.play_match(max_hands=max_hands)
     
     if args.export:
-        export_path = export_match_results(match_result, args.export_dir)
+        export_path = export_match_results(match_result, args.export_dir, args.ollama_model if "ollama" in args.agents.lower() else None)
         print(f"Match results exported to: {export_path}")
 
     if args.json:

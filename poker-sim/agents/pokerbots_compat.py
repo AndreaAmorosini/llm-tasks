@@ -6,8 +6,9 @@ import random
 import treys
 
 class PokerBotsBasePlayer:
-    def __init__(self, name: str = "NPC"):
+    def __init__(self, name: str = "NPC", rng: random.Random | None = None):
         self.name = name
+        self.rng = rng or random.Random()
         
     def play(self, valid_actions: dict[str, object], state) -> tuple[str, float]:
         raise NotImplementedError
@@ -25,22 +26,22 @@ class RandomPlayer(PokerBotsBasePlayer):
         if "complete_bet_or_raise_to" in valid_actions:
             possible_actions.append("complete_bet_or_raise_to")
             
-        action = random.choice(possible_actions)
+        action = self.rng.choice(possible_actions)
         
         if action == "fold" and valid_actions.get("check_or_call") == 0:
             return "check_or_call", 0.0
         
         if action == "complete_bet_or_raise_to":
             min_to, max_to = valid_actions[action]
-            amount = random.randint(min_to, max_to)
+            amount = self.rng.randint(min_to, max_to)
             return action, float(amount)
         
         return action, float(valid_actions[action])
     
 class GamblingPlayer(PokerBotsBasePlayer):
     #Monte Carlo Simulation
-    def __init__(self, name: str = "NPC", win_rate_threshold: float = 0.90, n_simulations: int = 100):
-        super().__init__(name)
+    def __init__(self, name: str = "NPC", win_rate_threshold: float = 0.90, n_simulations: int = 100, rng: random.Random | None = None):
+        super().__init__(name=name, rng=rng)
         self.win_rate_threshold = win_rate_threshold
         self.n_simulations = n_simulations
         
@@ -90,7 +91,7 @@ class GamblingPlayer(PokerBotsBasePlayer):
             cards: list = []
             if hasattr(state, "board_indices") and hasattr(state, "get_board"):
                 for board_index in state.board_indices:
-                    cards.extend(state.get_board(board_index))
+                    cards.extend(self._flatten_cards(state.get_board(board_index)))
                 return cards
             return self._flatten_cards(getattr(state, "board_cards", []))
         except Exception:
@@ -142,7 +143,7 @@ class GamblingPlayer(PokerBotsBasePlayer):
         for _ in range(n_simulations):
             missing_board = 5 - len(board)
             needed_cards = missing_board + 2 * (n_players - 1)
-            sampled = random.sample(deck, needed_cards)
+            sampled = self.rng.sample(deck, needed_cards)
             
             simulated_board = board + sampled[:missing_board]
             hero_score = evaluator.evaluate(hand=hero, board=simulated_board)

@@ -63,6 +63,7 @@ class HandLog:
     final_stacks: list[int] = field(default_factory=list)
     payoffs: list[int] = field(default_factory=list)
     pokerkit_operations: list[str] = field(default_factory=list)
+    hand_seed: int | None = None
     
 class HandLogger:
     def __init__(
@@ -72,7 +73,8 @@ class HandLogger:
         reveal_hole_cards: bool = True,
         include_legal_actions: bool = True,
         include_pokerkit_operations: bool = False,
-        player_labels: dict[int, str] | None = None
+        player_labels: dict[int, str] | None = None,
+        hand_seed: int | None = None
     ):
         self.reveal_hole_cards = reveal_hole_cards
         self.include_legal_actions = include_legal_actions
@@ -86,7 +88,8 @@ class HandLogger:
         self.hand = HandLog(
             hand_number = hand_number,
             player_count = state.player_count,
-            starting_stacks = [int(x) for x in state.starting_stacks]
+            starting_stacks = [int(x) for x in state.starting_stacks],
+            hand_seed = hand_seed
         )
         
         if reveal_hole_cards:
@@ -137,10 +140,7 @@ class HandLogger:
         action.bets_after = [int(x) for x in state.bets]
         action.pot_after = int(getattr(state, "total_pot_amount", 0))
         
-    def finish(self, state) -> HandLog:
-        # if self.reveal_hole_cards:
-        #     self.capture_hole_cards(state)
-            
+    def finish(self, state) -> HandLog:            
         self.hand.final_board = get_board_cards(state)
         self.hand.final_stacks = [int(x) for x in state.stacks]
         self.hand.payoffs = [int(x) for x in state.payoffs]
@@ -153,6 +153,7 @@ class HandLogger:
     def to_dict(self) -> dict[str, Any]:
         return {
             "hand_number": self.hand.hand_number,
+            "hand_seed": self.hand.hand_seed,
             "player_count": self.hand.player_count,
             "starting_stacks": self.hand.starting_stacks,
             "hole_cards": self.hand.hole_cards,
@@ -187,6 +188,7 @@ class HandLogger:
 
         lines.append("=" * 80)
         lines.append(f"HAND #{self.hand.hand_number}")
+        lines.append(f"Hand seed: {self.hand.hand_seed}" if self.hand.hand_seed is not None else "Hand seed: None")
         lines.append("=" * 80)
         lines.append(f"Starting stacks: {self.hand.starting_stacks}")
         lines.append("")
@@ -258,10 +260,34 @@ class HandLogger:
                     "actor_index": action.actor_index,
                     "player_label": self.player_labels.get(action.actor_index, f"P{action.actor_index}"),
                     "agent_name": action.agent_name,
+                    "own_hole_cards": self.hand.hole_cards.get(action.actor_index, []),
                     "board": action.board,
                     "raw_action": action.raw_action,
                     "applied_action": action.applied_action,
                     "decision_meta": action.decision_meta,
+                    "reasoning_summary": (
+                        action.decision_meta.get("response_thinking")
+                        if action.decision_meta and action.decision_meta.get("response_thinking")
+                        else action.decision_meta.get("final_reason")
+                        if action.decision_meta
+                        else None
+                    ),
+                    "motivation": (
+                        action.decision_meta.get("motivation")
+                        if action.decision_meta and action.decision_meta.get("motivation")
+                        else None
+                    ),
+                    "player_stack_before_action": (
+                        action.stacks_before[action.actor_index]
+                        if action.stacks_before and len(action.stacks_before) > action.actor_index
+                        else None
+                    ),
+                    "player_current_bet_before_action": (
+                        action.bets_before[action.actor_index]
+                        if action.bets_before and len(action.bets_before) > action.actor_index
+                        else None
+                    ),
+                    "pot_size_before_action": action.pot_before,
                 }
                 for action in self.hand.actions
                 if action.decision_meta is not None
