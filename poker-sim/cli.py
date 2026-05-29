@@ -115,6 +115,68 @@ def build_agents(kind: str, player_count: int, agent_seed: int | None, ollama_mo
         agents.append(PokerBotsRandomPlayer(name="PB_Random", rng=make_rng(agent_seed, 70_000)))
         
         return agents
+    
+    if kind == "llm-vs-llm-4":
+        agents = []
+        agents.append(OllamaAgent(
+            model=ollama_model,
+            name=f"Ollama_{ollama_model}_1",
+            host=ollama_host,
+            temperature=ollama_temperature,
+            timeout=ollama_timeout,
+            think=ollama_think
+        ))
+        
+        agents.append(OllamaAgent(
+            model=ollama_model,
+            name=f"Ollama_{ollama_model}_2",
+            host=ollama_host,
+            temperature=ollama_temperature,
+            timeout=ollama_timeout,
+            think=ollama_think
+        ))
+        
+        agents.append(OllamaAgent(
+            model=ollama_model,
+            name=f"Ollama_{ollama_model}_3",
+            host=ollama_host,
+            temperature=ollama_temperature,
+            timeout=ollama_timeout,
+            think=ollama_think
+        ))
+        
+        agents.append(OllamaAgent(
+            model=ollama_model,
+            name=f"Ollama_{ollama_model}_4",
+            host=ollama_host,
+            temperature=ollama_temperature,
+            timeout=ollama_timeout,
+            think=ollama_think
+        ))
+        
+        return agents
+    
+    if kind == "llm-vs-llm-2":
+        agents = []
+        agents.append(OllamaAgent(
+            model=ollama_model,
+            name=f"Ollama_{ollama_model}_1",
+            host=ollama_host,
+            temperature=ollama_temperature,
+            timeout=ollama_timeout,
+            think=ollama_think
+        ))
+        
+        agents.append(OllamaAgent(
+            model=ollama_model,
+            name=f"Ollama_{ollama_model}_2",
+            host=ollama_host,
+            temperature=ollama_temperature,
+            timeout=ollama_timeout,
+            think=ollama_think
+        ))
+        
+        return agents
         
 
 

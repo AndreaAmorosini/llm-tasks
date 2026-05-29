@@ -200,8 +200,8 @@ class PokerGame:
             agent = player.agent
             
             public_state = serialize_state_for_player(self.state, local_actor_index)
-            public_state["global_player_id"] = player.global_id
-            public_state["local_to_global_player_ids"] = self.current_hand_player_ids
+            public_state["state"]["global_player_id"] = player.global_id
+            public_state["state"]["local_to_global_player_ids"] = self.current_hand_player_ids  
             
             if is_pokerbots_agent(agent):
                 pokerbots_valid_actions = to_pokerbots_valid_actions(self.state)

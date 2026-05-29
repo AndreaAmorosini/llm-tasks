@@ -4,23 +4,33 @@ import time
 
 from ollama import chat, show
 
-SYSTEM_PROMPT = """You are an action-selection engine for No-Limit Texas Hold'em.
+SYSTEM_PROMPT = """You are a No-Limit Texas Hold'em decision engine.
 
-Choose exactly one action from legal_actions.
+Primary objective:
+- Maximize your long-term chip EV.
+- Maximize your stack.
+- Pressure opponents into losing chips when profitable.
 
-Rules:
+Core rules:
+- Choose exactly one action from legal_actions.
 - Use only an action present in legal_actions.
 - Never invent actions.
-- If check is not explicitly present in legal_actions, then check is not allowed.
-- If call is not explicitly present in legal_actions, then call is not allowed.
-- If action is bet, raise, or all_in, use amount_to.
-- amount_to must be within the allowed range.
-- Never output text outside JSON.
+- If action is bet, raise, or all_in, use amount_to within the allowed range.
+- Return JSON only.
 - Keep reason short.
-- Never assume hidden opponent cards.
-- If uncertain, choose the safest reasonable legal action.
 
-Return JSON only:
+Strategic rules:
+- Do not treat fold as the default safe action.
+- Prefer check over fold when checking is legal.
+- Prefer call over fold when the price is reasonable and the hand still has value or equity.
+- Prefer bet or raise with strong made hands.
+- Bluff or semi-bluff when it is a reasonable way to win the pot, apply pressure, deny equity, or build expected value.
+- Use aggression when profitable, not randomly.
+- Do not play overly passive or overly cautious poker.
+- Do not assume hidden opponent cards; reason only from the visible game state.
+- Fold mainly when the hand is weak, the price is bad, and aggression or continuation is not justified.
+
+Output format:
 {
   "type": "fold|check|call|bet|raise|all_in",
   "amount_to": 0,
@@ -185,50 +195,61 @@ class OllamaAgent:
         return any(marker in model_lower for marker in thinking_markers)
     
     def _build_prompt(self, public_state: dict[str, Any], legal_actions: list[dict[str, Any]]) -> str:
+        state = public_state["state"]
+
         legal_summary: list[str] = []
-        
         for action in legal_actions:
-            action_type = action.get("type")
-            if action_type in {"fold", "check"}:
-                legal_summary.append(f"- {action_type}")
+            action_type = action["type"]
+
+            if action_type == "fold":
+                legal_summary.append("fold")
+            elif action_type == "check":
+                legal_summary.append("check")
             elif action_type == "call":
-                legal_summary.append(f"- call amount={action.get('amount', 0)}")
+                legal_summary.append(f"call {action.get('amount', 0)}")
             elif action_type in {"bet", "raise", "all_in"}:
                 legal_summary.append(
-                    f"- {action_type} amount_to between {action.get('min')} and {action.get('max')}"
+                    f"{action_type} {action.get('min')}-{action.get('max')}"
                 )
-                        
+
+        compact_prompt_state = {
+            "street": state["street"],
+            "hero_cards": state["hero"]["cards"],
+            "board": state["board"],
+            "pot": state["pot"],
+            "to_call": state["to_call"],
+            "hero_stack": state["hero"]["stack"],
+            "hero_bet": state["hero"]["bet"],
+            "active_players": state["active_players"],
+            "players": state["players"],
+        }
+
         return f"""
-Decide the next poker action.
+Choose one poker action.
 
-You must choose exactly one action from legal_actions.
+State:
+{json.dumps(compact_prompt_state, ensure_ascii=False, separators=(",", ":"))}
 
-Valid choices summary:
-{chr(10).join(legal_summary)}
+Legal actions:
+{", ".join(legal_summary)}
 
-Output format:
+Rules:
+- Choose exactly one legal action.
+- If check is not listed, do not use check.
+- If call is not listed, do not use call.
+- If bet/raise/all_in is chosen, use amount_to.
+- If unsure, prefer check, then call, then fold.
+- Do not fold medium-strength or drawing hands just because the situation is uncertain.
+- Prefer the action that best increases expected chip gain, including profitable bluffing or pressure when justified.
+- Keep reason short.
+
+Return JSON only:
 {{
   "type": "fold|check|call|bet|raise|all_in",
   "amount_to": 0,
   "reason": "short explanation"
 }}
-
-Game state JSON:
-{json.dumps(public_state, ensure_ascii=False, indent=2)}
-
-Legal actions JSON:
-{json.dumps(legal_actions, ensure_ascii=False, indent=2)}
-
-Important:
-- Do not invent actions.
-- If action is bet, raise, or all_in, use amount_to.
-- Keep reason short.
-- If your chosen action is not present in legal_actions, your answer is invalid.
-- If multiple actions seem reasonable, prefer the simplest legal action.
-- If unsure, choose check if available, otherwise call if available, otherwise fold.
-- Return JSON only.
 """.strip()
-
 
     def _validate_or_fallback(self, action: dict[str, Any], legal_actions: list[dict[str, Any]]) -> dict[str, Any]:
         requested_type = action.get("type")
